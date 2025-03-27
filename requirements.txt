@@ -17,6 +17,7 @@ alembic>=1.12.0
 psycopg2-binary>=2.9.9
 pymc>=5.9.1
 arviz>=0.15.0 
+pydantic-settings
 
 # ======================
 # CORE APPLICATION STACK
