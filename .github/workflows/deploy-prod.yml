@@ -1,0 +1,60 @@
+name: Deploy to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to deploy'
+        required: true
+        type: string
+
+jobs:
+  deploy-prod:
+    runs-on: ubuntu-latest
+    environment: production
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+        
+    - name: Build and push Docker image
+      run: |
+        docker build -t ${{ secrets.ECR_REPOSITORY_URI }}:${{ github.event.inputs.version }} .
+        docker push ${{ secrets.ECR_REPOSITORY_URI }}:${{ github.event.inputs.version }}
+        
+    - name: Run database migrations
+      run: |
+        docker run --rm \
+          -e DATABASE_URL=${{ secrets.PROD_DATABASE_URL }} \
+          ${{ secrets.ECR_REPOSITORY_URI }}:${{ github.event.inputs.version }} \
+          alembic upgrade head
+        
+    - name: Trigger Render deployment
+      run: |
+        curl -X POST ${{ secrets.PROD_RENDER_HOOK_URL }}
+        
+    - name: Run smoke tests
+      run: |
+        curl -f http://${{ secrets.PROD_DOMAIN }}/health || exit 1
+        
+    - name: Notify deployment
+      if: always()
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const status = ${{ job.status }}
+          const message = status === 'success' 
+            ? '✅ Production deployment successful'
+            : '❌ Production deployment failed'
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: message
+          }) 

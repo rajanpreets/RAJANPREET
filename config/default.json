@@ -1,0 +1,41 @@
+{
+    "api": {
+        "version": "1.0.0",
+        "title": "Pharma Forecasting API",
+        "description": "API for pharmaceutical demand forecasting",
+        "docs_url": "/docs",
+        "redoc_url": "/redoc"
+    },
+    "database": {
+        "pool_size": 5,
+        "max_overflow": 10,
+        "pool_timeout": 30,
+        "pool_recycle": 1800
+    },
+    "logging": {
+        "level": "INFO",
+        "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        "file": "logs/app.log"
+    },
+    "forecasting": {
+        "default_forecast_periods": 12,
+        "confidence_interval": 0.95,
+        "seasonality": true,
+        "trend": true
+    },
+    "external_apis": {
+        "fda": {
+            "base_url": "https://api.fda.gov",
+            "timeout": 30
+        },
+        "cdc": {
+            "base_url": "https://api.cdc.gov",
+            "timeout": 30
+        }
+    },
+    "security": {
+        "jwt_secret": "",
+        "jwt_algorithm": "HS256",
+        "access_token_expire_minutes": 30
+    }
+}

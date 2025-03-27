@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: pharma-forecasting-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn src.backend.app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: DATABASE_URL
+        value: "postgresql://neondb_owner:npg_LfKRoPsU9c1b@ep-mute-grass-a553p2f5-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require"
+      - key: GROK_API_KEY
+        sync: false
+      - key: SERPER_API_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        value: "*"
