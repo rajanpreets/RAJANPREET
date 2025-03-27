@@ -2,8 +2,9 @@ import numpy as np
 import pandas as pd
 import pymc as pm
 import arviz as az
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, List, Optional
 import logging
+from scipy import stats
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +22,9 @@ class BayesianEpidemiologicalModel:
             trend: Whether to include trend effects
         """
         self.prior_params = prior_params or {
-            'alpha': {'mu': 0, 'sigma': 10},
-            'beta': {'mu': 0, 'sigma': 10},
-            'sigma': {'alpha': 1, 'beta': 1}
+            'market_size': {'mean': 1000000, 'std': 500000},
+            'patient_share': {'mean': 0.2, 'std': 0.1},
+            'revenue': {'mean': 100000000, 'std': 50000000}
         }
         self.seasonality = seasonality
         self.trend = trend
@@ -40,13 +41,13 @@ class BayesianEpidemiologicalModel:
         with pm.Model() as self.model:
             # Priors
             alpha = pm.Normal('alpha',
-                            mu=self.prior_params['alpha']['mu'],
-                            sigma=self.prior_params['alpha']['sigma'])
+                            mu=self.prior_params['market_size']['mean'],
+                            sigma=self.prior_params['market_size']['std'])
             
             if self.trend:
                 beta = pm.Normal('beta',
-                               mu=self.prior_params['beta']['mu'],
-                               sigma=self.prior_params['beta']['sigma'])
+                               mu=self.prior_params['patient_share']['mean'],
+                               sigma=self.prior_params['patient_share']['std'])
             
             if self.seasonality:
                 # Seasonal effect
@@ -65,7 +66,7 @@ class BayesianEpidemiologicalModel:
             
             # Observation model
             sigma = pm.HalfNormal('sigma',
-                                sigma=self.prior_params['sigma']['alpha'])
+                                sigma=self.prior_params['revenue']['std'])
             
             cases = pm.Normal('cases',
                             mu=mu,
@@ -145,4 +146,193 @@ class BayesianEpidemiologicalModel:
         if self.trace is None:
             raise ValueError("Model must be fit before getting summary")
             
-        return az.summary(self.trace, var_names=['alpha', 'beta', 'sigma']) 
+        return az.summary(self.trace, var_names=['alpha', 'beta', 'sigma'])
+
+    def forecast_market_size(
+        self,
+        market_data: Dict,
+        epi_data: Dict,
+        fda_data: Dict,
+        forecast_horizon: int
+    ) -> Dict:
+        """
+        Generate market size forecast using Bayesian inference.
+        """
+        # Extract relevant data
+        prevalence = epi_data.get('prevalence', 0)
+        incidence = epi_data.get('incidence', 0)
+        market_trend = market_data.get('market_trend', 0)
+        approval_status = fda_data.get('approval_status', 'pending')
+
+        # Calculate posterior parameters
+        posterior_mean = self._calculate_posterior_mean(
+            prior_mean=self.prior_params['market_size']['mean'],
+            prior_std=self.prior_params['market_size']['std'],
+            likelihood_mean=prevalence * incidence * 1000,  # Convert to patient count
+            likelihood_std=market_trend * 100000  # Market trend uncertainty
+        )
+
+        # Generate forecast
+        forecast = []
+        for year in range(forecast_horizon):
+            if approval_status == 'approved':
+                growth_factor = 1.1  # 10% growth for approved drugs
+            else:
+                growth_factor = 1.05  # 5% growth for pending drugs
+
+            year_forecast = posterior_mean * (growth_factor ** year)
+            forecast.append(year_forecast)
+
+        # Calculate confidence intervals
+        ci_lower, ci_upper = self._calculate_confidence_intervals(forecast)
+
+        return {
+            "market_size": forecast[-1],  # Return final year forecast
+            "confidence_interval": [ci_lower[-1], ci_upper[-1]]
+        }
+
+    def forecast_patient_share(
+        self,
+        market_data: Dict,
+        ai_analysis: Dict,
+        forecast_horizon: int
+    ) -> Dict:
+        """
+        Generate patient share forecast using Bayesian inference.
+        """
+        # Extract relevant data
+        market_share = market_data.get('market_share', 0)
+        competitor_analysis = ai_analysis.get('competitor_analysis', {})
+        treatment_preference = ai_analysis.get('treatment_preference', 0)
+
+        # Calculate posterior parameters
+        posterior_mean = self._calculate_posterior_mean(
+            prior_mean=self.prior_params['patient_share']['mean'],
+            prior_std=self.prior_params['patient_share']['std'],
+            likelihood_mean=market_share * treatment_preference,
+            likelihood_std=0.1  # Uncertainty in treatment preference
+        )
+
+        # Generate forecast
+        forecast = []
+        for year in range(forecast_horizon):
+            # Adjust for competitor dynamics
+            competitor_factor = self._calculate_competitor_factor(
+                competitor_analysis,
+                year
+            )
+            
+            year_forecast = posterior_mean * competitor_factor
+            forecast.append(year_forecast)
+
+        # Calculate confidence intervals
+        ci_lower, ci_upper = self._calculate_confidence_intervals(forecast)
+
+        return {
+            "patient_share": forecast[-1],  # Return final year forecast
+            "confidence_interval": [ci_lower[-1], ci_upper[-1]]
+        }
+
+    def forecast_revenue(
+        self,
+        market_size: float,
+        patient_share: float,
+        pricing_data: Dict,
+        forecast_horizon: int
+    ) -> Dict:
+        """
+        Generate revenue forecast using Bayesian inference.
+        """
+        # Extract relevant data
+        price_per_patient = pricing_data.get('price_per_patient', 0)
+        reimbursement_rate = pricing_data.get('reimbursement_rate', 0.8)
+
+        # Calculate posterior parameters
+        posterior_mean = self._calculate_posterior_mean(
+            prior_mean=self.prior_params['revenue']['mean'],
+            prior_std=self.prior_params['revenue']['std'],
+            likelihood_mean=market_size * patient_share * price_per_patient * reimbursement_rate,
+            likelihood_std=market_size * patient_share * price_per_patient * 0.2  # 20% uncertainty
+        )
+
+        # Generate forecast
+        forecast = []
+        for year in range(forecast_horizon):
+            # Adjust for price changes and market dynamics
+            price_factor = self._calculate_price_factor(pricing_data, year)
+            
+            year_forecast = posterior_mean * price_factor
+            forecast.append(year_forecast)
+
+        # Calculate confidence intervals
+        ci_lower, ci_upper = self._calculate_confidence_intervals(forecast)
+
+        return {
+            "revenue": forecast[-1],  # Return final year forecast
+            "confidence_interval": [ci_lower[-1], ci_upper[-1]]
+        }
+
+    def _calculate_posterior_mean(
+        self,
+        prior_mean: float,
+        prior_std: float,
+        likelihood_mean: float,
+        likelihood_std: float
+    ) -> float:
+        """
+        Calculate posterior mean using Bayesian updating.
+        """
+        prior_precision = 1 / (prior_std ** 2)
+        likelihood_precision = 1 / (likelihood_std ** 2)
+        
+        posterior_precision = prior_precision + likelihood_precision
+        posterior_mean = (
+            (prior_mean * prior_precision + likelihood_mean * likelihood_precision)
+            / posterior_precision
+        )
+        
+        return posterior_mean
+
+    def _calculate_confidence_intervals(
+        self,
+        forecast: List[float],
+        confidence: float = 0.95
+    ) -> tuple:
+        """
+        Calculate confidence intervals for the forecast.
+        """
+        std = np.std(forecast)
+        ci = stats.t.interval(confidence, len(forecast)-1, loc=np.mean(forecast), scale=std)
+        return ci[0], ci[1]
+
+    def _calculate_competitor_factor(
+        self,
+        competitor_analysis: Dict,
+        year: int
+    ) -> float:
+        """
+        Calculate the impact of competitor dynamics on patient share.
+        """
+        # Simplified competitor impact calculation
+        new_entrants = competitor_analysis.get('new_entrants', 0)
+        market_exits = competitor_analysis.get('market_exits', 0)
+        
+        impact = 1.0
+        if new_entrants > 0:
+            impact *= (1 - 0.1 * new_entrants)  # 10% reduction per new entrant
+        if market_exits > 0:
+            impact *= (1 + 0.15 * market_exits)  # 15% increase per market exit
+            
+        return impact
+
+    def _calculate_price_factor(
+        self,
+        pricing_data: Dict,
+        year: int
+    ) -> float:
+        """
+        Calculate the impact of price changes on revenue.
+        """
+        # Simplified price impact calculation
+        price_inflation = pricing_data.get('price_inflation', 0.05)  # 5% default inflation
+        return (1 + price_inflation) ** year 

@@ -14,56 +14,131 @@ from ..schemas.forecast import (
 )
 from ..dependencies.database import get_db
 from ..dependencies.auth import get_current_user
+from ..models.forecast import (
+    MarketSizeForecast,
+    PatientShareForecast,
+    RevenueForecast,
+    ForecastRequest
+)
+from ..core.config import settings
+from data_pipeline.ingestion.api_connectors.grok_connector import GrokConnector
+from data_pipeline.ingestion.api_connectors.serper_connector import SerperConnector
+from data_pipeline.ingestion.api_connectors.fda_connector import FDAConnector
+from data_pipeline.ingestion.api_connectors.cdc_connector import CDCConnector
+from models.epidemiology.bayesian_model import BayesianEpidemiologicalModel
 
 router = APIRouter(prefix="/forecast", tags=["forecast"])
 
-@router.post("/market-size", response_model=ForecastResponse)
-async def forecast_market_size(
-    request: MarketSizeRequest,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """
-    Generate market size forecast for a specific disease/condition.
-    """
-    try:
-        service = ForecastService(db)
-        result = await service.generate_market_size_forecast(request)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+# Initialize connectors
+grok_connector = GrokConnector(api_key=settings.grok_api_key)
+serper_connector = SerperConnector(api_key=settings.serper_api_key)
+fda_connector = FDAConnector()
+cdc_connector = CDCConnector()
 
-@router.post("/patient-share", response_model=ForecastResponse)
-async def forecast_patient_share(
-    request: PatientShareRequest,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """
-    Generate patient share forecast for a specific drug.
-    """
-    try:
-        service = ForecastService(db)
-        result = await service.generate_patient_share_forecast(request)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+# Initialize models
+bayesian_model = BayesianEpidemiologicalModel()
 
-@router.post("/revenue", response_model=ForecastResponse)
-async def forecast_revenue(
-    request: RevenueRequest,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """
-    Generate revenue forecast for a specific drug.
-    """
+@router.post("/market-size", response_model=MarketSizeForecast)
+async def forecast_market_size(request: ForecastRequest):
     try:
-        service = ForecastService(db)
-        result = await service.generate_revenue_forecast(request)
-        return result
+        # Get market research data from Serper
+        market_data = await serper_connector.get_market_research(
+            disease=request.disease,
+            region=request.region
+        )
+        
+        # Get epidemiological data from CDC
+        epi_data = await cdc_connector.get_disease_data(
+            disease=request.disease,
+            region=request.region
+        )
+        
+        # Get FDA approval data
+        fda_data = await fda_connector.get_approval_data(
+            disease=request.disease
+        )
+        
+        # Generate forecast using Bayesian model
+        forecast = bayesian_model.forecast_market_size(
+            market_data=market_data,
+            epi_data=epi_data,
+            fda_data=fda_data,
+            forecast_horizon=request.forecast_horizon
+        )
+        
+        return MarketSizeForecast(
+            disease=request.disease,
+            region=request.region,
+            forecast_horizon=request.forecast_horizon,
+            market_size=forecast["market_size"],
+            confidence_interval=forecast["confidence_interval"]
+        )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/patient-share", response_model=PatientShareForecast)
+async def forecast_patient_share(request: ForecastRequest):
+    try:
+        # Get market research data
+        market_data = await serper_connector.get_market_research(
+            disease=request.disease,
+            region=request.region
+        )
+        
+        # Get AI analysis from Grok
+        ai_analysis = await grok_connector.analyze_market(
+            disease=request.disease,
+            region=request.region
+        )
+        
+        # Generate forecast
+        forecast = bayesian_model.forecast_patient_share(
+            market_data=market_data,
+            ai_analysis=ai_analysis,
+            forecast_horizon=request.forecast_horizon
+        )
+        
+        return PatientShareForecast(
+            disease=request.disease,
+            region=request.region,
+            forecast_horizon=request.forecast_horizon,
+            patient_share=forecast["patient_share"],
+            confidence_interval=forecast["confidence_interval"]
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/revenue", response_model=RevenueForecast)
+async def forecast_revenue(request: ForecastRequest):
+    try:
+        # Get market size forecast
+        market_size = await forecast_market_size(request)
+        
+        # Get patient share forecast
+        patient_share = await forecast_patient_share(request)
+        
+        # Get pricing data from FDA
+        pricing_data = await fda_connector.get_pricing_data(
+            disease=request.disease
+        )
+        
+        # Generate revenue forecast
+        forecast = bayesian_model.forecast_revenue(
+            market_size=market_size.market_size,
+            patient_share=patient_share.patient_share,
+            pricing_data=pricing_data,
+            forecast_horizon=request.forecast_horizon
+        )
+        
+        return RevenueForecast(
+            disease=request.disease,
+            region=request.region,
+            forecast_horizon=request.forecast_horizon,
+            revenue=forecast["revenue"],
+            confidence_interval=forecast["confidence_interval"]
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/results/{forecast_id}", response_model=ForecastResult)
 async def get_forecast_results(

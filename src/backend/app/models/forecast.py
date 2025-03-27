@@ -5,6 +5,35 @@ import uuid
 
 from ..database.base import Base
 
+from pydantic import BaseModel
+from typing import List, Optional
+
+class ForecastRequest(BaseModel):
+    disease: str
+    region: str
+    forecast_horizon: int
+
+class MarketSizeForecast(BaseModel):
+    disease: str
+    region: str
+    forecast_horizon: int
+    market_size: float
+    confidence_interval: List[float]
+
+class PatientShareForecast(BaseModel):
+    disease: str
+    region: str
+    forecast_horizon: int
+    patient_share: float
+    confidence_interval: List[float]
+
+class RevenueForecast(BaseModel):
+    disease: str
+    region: str
+    forecast_horizon: int
+    revenue: float
+    confidence_interval: List[float]
+
 class ForecastRun(Base):
     __tablename__ = "forecast_runs"
 

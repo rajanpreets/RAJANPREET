@@ -2,20 +2,17 @@ from pydantic_settings import BaseSettings
 from typing import Optional
 
 class Settings(BaseSettings):
-    # API Configuration
-    api_title: str = "Pharma Forecasting API"
-    api_description: str = "API for pharmaceutical demand forecasting"
-    api_version: str = "1.0.0"
-    api_docs_url: str = "/docs"
-    api_redoc_url: str = "/redoc"
-
-    # Database Configuration
-    database_url: str
-
-    # External API Keys
-    grok_api_key: str
-    serper_api_key: str
-
+    # API Keys
+    grok_api_key: Optional[str] = None
+    serper_api_key: Optional[str] = None
+    
+    # Database
+    database_url: Optional[str] = None
+    
+    # API Settings
+    api_prefix: str = "/api/v1"
+    project_name: str = "Pharma Forecasting API"
+    
     # External API URLs
     grok_api_url: str = "https://api.grok.ai/v1"
     serper_api_url: str = "https://google.serper.dev/search"
